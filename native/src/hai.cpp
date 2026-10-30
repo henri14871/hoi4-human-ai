@@ -102,6 +102,8 @@ constexpr int kNumUpdateSlots = sizeof(kUpdateSlotLabels) / sizeof(kUpdateSlotLa
 // ---------------------------------------------------------------------------
 static std::atomic<bool> g_enabled{false};
 static std::atomic<bool> g_mp_test{false};  // single-player stand-in for a multiplayer client
+static std::atomic<bool> g_pack_defines{true};  // apply the pack's AI defines
+static std::atomic<bool> g_pack_data{true};     // load the pack's strategies/templates/designs (at launch)
 static std::atomic<bool> g_ai_controls[kCount];
 
 static unsigned AIMask() {
@@ -140,6 +142,8 @@ static void LoadConfig() {
     IniPath(ini);
     g_enabled = GetPrivateProfileIntA("human_ai", "enabled", 1, ini) != 0;
     g_mp_test = GetPrivateProfileIntA("human_ai", "mp_test", 0, ini) != 0;
+    g_pack_defines = GetPrivateProfileIntA("human_ai", "pack_defines", 1, ini) != 0;
+    g_pack_data = GetPrivateProfileIntA("human_ai", "pack_data", 1, ini) != 0;
     char pack[MAX_PATH] = {};
     GetPrivateProfileStringA("human_ai", "ai_pack", "", pack, MAX_PATH, ini);
     {
@@ -309,6 +313,7 @@ static bool g_mp_ready = false;
 static std::atomic<int> g_role{kRoleNone};
 static std::atomic<int> g_mine_tag{0};  // local player's country tag (0 = none)
 static std::atomic<int> g_dropped{0};
+static std::atomic<bool> g_forcing{false};  // client: we are forcing ai_update for our own country
 
 static Getter_t VFunc(void* obj, int offset) {
     return reinterpret_cast<Getter_t*>(*reinterpret_cast<void***>(obj))[offset / 8];
@@ -361,14 +366,15 @@ static bool Multiplayer() {
     return g_mp_ready && (r == kRoleHost || r == kRoleClient || TestMode());
 }
 
-static bool HostLike() { return g_role == kRoleHost || TestMode(); }  // runs the AI countries' AI
 
 // Replaces the "is AI (or human_ai)" call at the top of CCountryAI::Update.
 extern "C" bool __fastcall HaiCountryGate(void* country) {
     bool orig = g_gate_orig(country);
-    if (!g_enabled || g_chain_bad || !Multiplayer()) return orig;
-    if (IsMine(country)) return AIMask() != 0;
-    return HostLike() ? orig : false;
+    if (!g_enabled || g_chain_bad || !Multiplayer() || !AIMask()) return orig;
+    if (IsMine(country)) return true;
+    // Other countries: exactly the game's answer, except while we force the AI tick on a
+    // client, where nobody else's AI may run.
+    return g_forcing ? false : orig;
 }
 
 // On a client the AI normally never runs; force ai_update while we need it.
@@ -393,11 +399,12 @@ static void SetJumpBytes(const uint8_t b[2]) {
 static void SyncScheduler() {
     static const uint8_t nops[2] = {0x90, 0x90};
     bool force = g_mp_ready && g_enabled && !g_chain_bad && g_role == kRoleClient && g_mine_tag != 0 && AIMask();
+    g_forcing = force;
     SetJumpBytes(force ? nops : g_sched_orig);
 }
 
 static bool ShouldPost(void* cmd, void* posting) {
-    if (!g_enabled || !g_mp_ready || (g_role != kRoleClient && !TestMode())) return true;
+    if (!g_enabled || !g_mp_ready || !(g_forcing || TestMode())) return true;
     void* country = nullptr;
     __try { country = PostingCountry(posting); } __except (EXCEPTION_EXECUTE_HANDLER) { country = nullptr; }
     if (TestMode()) {
@@ -421,9 +428,11 @@ extern "C" bool HaiShouldRun(void* self, HookCtx* ctx, void* arg2) {
     if (!country) return true;
     bool ai_country = IsAITag(*g_gamestate, (uint8_t*)country + kCountryTagOffset);
     bool run;
-    if (Multiplayer()) {
+    if (Multiplayer() && AIMask()) {
         if (IsMine(country)) run = (AIMask() & ctx->mask) != 0;
-        else run = HostLike() && ai_country;  // a client never runs anyone else's AI
+        else run = g_forcing ? false : true;  // others: the game's own behaviour, unless we force the client tick
+    } else if (Multiplayer()) {
+        run = true;  // nothing handed to the AI: stay out of the way entirely
     } else {
         run = ai_country || (AIMask() & ctx->mask);
     }
@@ -656,6 +665,7 @@ static void SyncPack(int role) {
         std::lock_guard<std::mutex> lock(g_pack_mutex);
         want = g_pack;
     }
+    if (!g_pack_defines) want.clear();  // pack_defines=0: keep the game's own AI defines
     bool game = role != kRoleNone;
     bool mp = Multiplayer();  // includes mp_test
     if (game == in_game && want == applied && (!game || mp == applied_mp)) return;
@@ -923,6 +933,7 @@ DWORD WINAPI InitThread(LPVOID dll_module) {
             std::lock_guard<std::mutex> lock(g_pack_mutex);
             pack = g_pack;
         }
+        if (!g_pack_data) pack.clear();  // pack_data=0: don't load the pack's AI databases
         if (!pack.empty() && !aidata::InstallPackLoaders(std::string(g_dir) + "\\human_ai_packs\\" + pack))
             Log("aidata: pack '%s' strategies/templates can't be loaded on this game version", pack.c_str());
     }

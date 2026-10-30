@@ -171,6 +171,8 @@ cryptology=0
 launch_app=1   ; open HumanAI.exe when the game starts
 ai_pack=       ; folder in human_ai_packs, empty = vanilla AI
 mp_test=0      ; 1 = single-player stand-in for a multiplayer client (see README)
+pack_defines=1 ; 0 = don't apply the pack's AI defines
+pack_data=1    ; 0 = don't load the pack's strategies/templates/designs (takes effect at launch)
 
 [app]          ; written by HumanAI.exe
 keep_on_top=1
