@@ -185,9 +185,9 @@ class SettingsForm : Form {
         packLabel = MakeLabel("Drop an AI mod's folder into human_ai_packs to use it.", 16, y,
                               new Font("Segoe UI", 8.5f), CMuted);
         packLabel.AutoSize = false;
-        packLabel.Size = new Size(348, 34);
+        packLabel.Size = new Size(348, 50);
         Controls.Add(packLabel);
-        y += 40;
+        y += 56;
 
         topBox = new CheckBox { Text = "Keep on top of the game", Location = new Point(16, y), AutoSize = true, ForeColor = CMuted };
         topBox.CheckedChanged += delegate {
@@ -288,6 +288,18 @@ class SettingsForm : Form {
         LoadFromIni();
     }
 
+    // Which AI database folders the pack brings (loaded by version.dll at game start).
+    string PackAIFolders(string pack) {
+        string common = Path.Combine(Path.Combine(packsDir, pack), "common");
+        var parts = new System.Collections.Generic.List<string>();
+        if (Directory.Exists(Path.Combine(common, "ai_strategy")) || Directory.Exists(Path.Combine(common, "ai_strategy_plans")))
+            parts.Add("strategies");
+        if (Directory.Exists(Path.Combine(common, "ai_templates"))) parts.Add("division templates");
+        if (Directory.Exists(Path.Combine(common, "ai_equipment"))) parts.Add("equipment designs");
+        if (Directory.Exists(Path.Combine(common, "ai_areas"))) parts.Add("areas");
+        return string.Join(", ", parts.ToArray());
+    }
+
     void FillPacks() {
         bool was = loading;
         loading = true;
@@ -325,11 +337,13 @@ class SettingsForm : Form {
         string appliedPack = Ini.Str(statusIni, "pack", "name", "");
         if (pick.Length == 0) {
             packLabel.Text = "Vanilla AI. Drop an AI mod's folder into human_ai_packs to use it.";
-        } else if (appliedPack == pick) {
-            packLabel.Text = string.Format("{0}: {1} AI settings applied, {2} gameplay settings ignored.",
-                pick, Ini.Int(statusIni, "pack", "applied", 0), Ini.Int(statusIni, "pack", "ignored", 0));
         } else {
-            packLabel.Text = pick + ": applies when a game is loaded.";
+            string ai = PackAIFolders(pick);
+            string extra = ai.Length > 0 ? " Its " + ai + " load when the game starts (restart to change)." : "";
+            packLabel.Text = appliedPack == pick
+                ? string.Format("{0}: {1} AI settings applied, {2} gameplay settings ignored.{3}", pick,
+                                Ini.Int(statusIni, "pack", "applied", 0), Ini.Int(statusIni, "pack", "ignored", 0), extra)
+                : pick + ": settings apply when a game is loaded." + extra;
         }
 
         string state = Ini.Str(statusIni, "status", "state", "");

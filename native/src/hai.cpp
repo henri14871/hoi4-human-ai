@@ -19,6 +19,7 @@
 
 #include <shlobj.h>
 
+#include "aidata.h"
 #include "defines.h"
 #include "scan.h"
 
@@ -649,9 +650,9 @@ static void SyncPack(int role) {
     }
     std::string dir = std::string(g_dir) + "\\human_ai_packs\\" + want;
     defines::ApplyResult r = defines::ApplyPack(dir);
-    Log("pack '%s': %d AI defines applied, %d not in this game version, %d gameplay defines ignored, %d arrays "
-        "not supported yet",
-        want.c_str(), r.applied, r.skipped, r.ignored, r.tables);
+    Log("pack '%s': %d AI defines applied (%d arrays), %d not in this game version, %d gameplay defines ignored, "
+        "%d arrays not applicable",
+        want.c_str(), r.applied, r.arrays, r.skipped, r.ignored, r.tables);
     WritePackStatus(want, r);
 }
 
@@ -891,7 +892,18 @@ DWORD WINAPI InitThread(LPVOID dll_module) {
 
     Log("human_ai " HAI_VERSION " loading");
     LoadConfig();
-    if (!scan::img.init() || !Resolve() || !InstallHooks()) {
+    if (!scan::img.init()) return 0;
+    {
+        // First, before the slower scans: the loading screen reads the AI databases soon after launch.
+        std::string pack;
+        {
+            std::lock_guard<std::mutex> lock(g_pack_mutex);
+            pack = g_pack;
+        }
+        if (!pack.empty() && !aidata::InstallPackLoaders(std::string(g_dir) + "\\human_ai_packs\\" + pack))
+            Log("aidata: pack '%s' strategies/templates can't be loaded on this game version", pack.c_str());
+    }
+    if (!Resolve() || !InstallHooks()) {
         Log("human_ai disabled: the game build does not match what this dll expects");
         WriteStatus("unsupported");
         LaunchApp();  // so the window can say so
@@ -944,6 +956,7 @@ extern "C" __declspec(dllexport) int HaiSelfTest(const char* exe_path, const cha
     // Optional: HAI_TEST_PACK=<folder> also parses a pack against the mapped image.
     char pack[MAX_PATH];
     if (ok && GetEnvironmentVariableA("HAI_TEST_PACK", pack, MAX_PATH)) {
+        aidata::InstallPackLoaders(pack, false);
         defines::ApplyResult r = defines::ApplyPack(pack);
         Log("self-test pack: %d applied, %d not found, %d gameplay ignored, %d arrays", r.applied, r.skipped,
             r.ignored, r.tables);

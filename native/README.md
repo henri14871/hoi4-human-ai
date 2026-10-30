@@ -92,14 +92,31 @@ Two details:
 - **Types:** the typed readers are classified by behaviour, not address. A `mulss` by `100000` or
   `32768` means fixed point (`int64 = round(v × scale)`), `movss [r12]` means float, and
   `mov [r12], ebx` means int32.
-- **Coverage:** build 1.19.4.1 has 4,177 typed defines, including 909 `NAI` and 16 `NAITheatre`.
+- **Coverage:** build 1.19.4.1 has 4,489 defines (947 `NAI`, 16 `NAITheatre`), of which 312 are arrays or strings.
 - **Applying a pack:** only `NAI`/`NAITheatre` lines from `human_ai_packs\<pack>\common\defines\*.lua`
   are written, in file-name order. The originals are saved and restored when you switch packs. It
   happens once a game session exists, after the game has read its own defines.
 - **Tested with Frontline AI 3.0:** 511 AI defines applied, 20 not in this game version, 69 gameplay
-  defines ignored, 16 arrays skipped.
+  defines ignored; its 16 AI arrays are applied in a running game when their lengths match.
+
+**Arrays:** an array define is `{ float* data; int count; }` (read as `mov rax,[var] ; mulss
+xmm,[rax+4]`). A pack array is written only if the game's array has the same length and its
+current values really are floats, so int arrays are refused, not corrupted. Arrays can only be
+checked in a running game; the self-test reports them as not applicable.
+
+**AI database folders** (`src/aidata.cpp`):
+- **Finding the loaders:** the loading screen loads each AI folder with `lea rdx,"common/<folder>" ;
+  call <string ctor> ; call <db wrapper> ; call <string dtor>`. Each wrapper stores the folder,
+  calls `LoadFiles(db, path)`, then post-processes (`[rax+0x10]`) and links (`[rax+0x20]`).
+- **The hook:** the `LoadFiles` call in the wrappers for `ai_strategy`, `ai_strategy_plans`,
+  `ai_templates`, `ai_equipment` and `ai_areas` is redirected (via `HaiDbThunk`). It runs the game's
+  own folder, then mounts the pack with the exported `PHYSFS_mount(pack, "hai_pack", 1)`, and loads
+  `hai_pack/common/<folder>` into the same database before it's linked.
+- **Install order:** these hooks go in first at startup, and only when the selected pack has one of
+  those folders.
 
 The self-test parses a pack too. Set `HAI_TEST_PACK=<pack folder>` before running it.
+On 1.19.4.1 it finds 4,489 defines, matching the game's own "4489 defines loaded".
 
 ## Config file
 

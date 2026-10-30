@@ -2,6 +2,7 @@
 
 EXTERN g_ver:QWORD
 EXTERN HaiShouldRun:PROC
+EXTERN HaiDbLoad:PROC
 
 .code
 
@@ -77,5 +78,15 @@ skip:
     xor     eax, eax
     ret
 HaiThunk ENDP
+
+; ---------------------------------------------------------------------------
+; HaiDbThunk: AI database loader hook. Entered from a stub with r10 = DbHook*;
+; LoadFiles(db = rcx, path = rdx) becomes HaiDbLoad(db, path, hook).
+; ---------------------------------------------------------------------------
+PUBLIC HaiDbThunk
+HaiDbThunk PROC
+    mov     r8, r10
+    jmp     HaiDbLoad
+HaiDbThunk ENDP
 
 END

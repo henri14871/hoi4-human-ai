@@ -10,10 +10,11 @@ bool BuildRegistry();
 size_t RegistrySize(const char* category);
 
 struct ApplyResult {
-    int applied = 0;   // values written
+    int applied = 0;   // values written (including arrays)
+    int arrays = 0;    // of which arrays
     int skipped = 0;   // AI defines the game doesn't have (stale or renamed)
     int ignored = 0;   // non-AI defines (gameplay), never applied
-    int tables = 0;    // array values, not supported yet
+    int tables = 0;    // array values that could not be applied (different length or not numbers)
 };
 
 // Apply pack_dir\common\defines\*.lua. Restores any previous pack first.

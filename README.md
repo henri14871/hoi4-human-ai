@@ -41,15 +41,23 @@ Want your AI to be better than vanilla? Drop any AI mod's folder (for example a 
 mod) into `human_ai_packs` in the game folder. The **Folder** button in the window opens it. Then
 pick it under **AI pack**.
 
-- Human AI applies only the pack's **AI settings** (`NAI`/`NAITheatre` defines), in memory, when a
-  game loads. You don't enable the mod in the launcher, so your multiplayer checksum stays vanilla.
-- Gameplay settings in the pack (combat, supply, production buffs, events) are ignored on purpose:
-  one-sided, they would desync a multiplayer game.
-- Picking **None** restores the game's own values.
+What Human AI takes from a pack:
+
+| From the pack | When | Notes |
+|---|---|---|
+| AI settings (`NAI`/`NAITheatre` defines, including arrays) | when a game loads, and live when you switch packs | **None** restores the game's own values |
+| AI strategies (`ai_strategy`, `ai_strategy_plans`) | at game start | restart the game to change |
+| AI division templates (`ai_templates`) | at game start | restart the game to change |
+| AI equipment designs (`ai_equipment`) and AI areas (`ai_areas`) | at game start | restart the game to change |
+
+- You don't enable the mod in the launcher, so your multiplayer checksum stays vanilla. The pack's
+  files are read from outside the game's `common/` folder.
+- Everything else in the pack is ignored on purpose: combat and supply settings, production buffs,
+  events, scripted effects and modifiers. One-sided, they would desync a multiplayer game.
 - **Who it affects:** in single-player, and when you host, the game runs every AI nation on your PC,
-  so they use the pack's settings too. As a multiplayer client, only your own country's AI runs on
-  your PC.
-- Not supported yet: array settings, and the pack's `ai_strategy` / `ai_templates` files.
+  so they use the pack too. As a multiplayer client, only your own country's AI runs on your PC.
+- Strategies that depend on flags the pack's own scripts would set do nothing, because those
+  scripts aren't run. For Frontline AI that's its crisis-detection strategies.
 
 ## Install
 

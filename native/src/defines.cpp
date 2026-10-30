@@ -105,7 +105,8 @@ bool BuildRegistry() {
         uint8_t* fn = scan::rel32(call + 1);
         auto it = readers.find(fn);
         if (it == readers.end()) it = readers.emplace(fn, Classify(fn)).first;
-        if (it->second.type == kUnknown) continue;
+        // Other readers (arrays, strings) are kept as kUnknown; only arrays are ever written,
+        // and only after checking the memory really is a float array of the same length.
         // Category: nearest preceding `lea rdx, "N..."` in the same small reader function.
         const char* cat = nullptr;
         for (uint8_t* q = p - 3; q > p - 0x300 && q > text.begin; --q) {
@@ -119,8 +120,10 @@ bool BuildRegistry() {
         std::string key = std::string(cat) + "." + name;
         g_registry.emplace(key, Define{it->second.type, it->second.scale, scan::rel32(p + 3)});
     }
-    hai::Log("defines: %zu registered (%zu NAI, %zu NAITheatre)", g_registry.size(), RegistrySize("NAI"),
-             RegistrySize("NAITheatre"));
+    size_t other = 0;
+    for (auto& kv : g_registry) other += kv.second.type == kUnknown;
+    hai::Log("defines: %zu registered (%zu NAI, %zu NAITheatre; %zu arrays/other)", g_registry.size(),
+             RegistrySize("NAI"), RegistrySize("NAITheatre"), other);
     return RegistrySize("NAI") > 100;
 }
 
@@ -155,7 +158,56 @@ static void Write(const Define& d, double v) {
     }
 }
 
-// One `NDefines.<Cat>.<NAME> = <value>` per line; comments start with "--".
+// Array defines are { float* data; int count; } (seen as `mov rax,[var] ; mulss xmm,[rax+4]`).
+// Only overwrite when the game's array has the same length and really holds floats: an int
+// array read as floats shows up as denormals, so it is refused rather than corrupted.
+static bool LooksLikeFloatArray(void* value, size_t want, float** out) {
+    __try {
+        float* data = *static_cast<float**>(value);
+        int count = *reinterpret_cast<int*>((uint8_t*)value + 8);
+        if (!data || count <= 0 || count > 64 || (size_t)count != want) return false;
+        for (int i = 0; i < count; ++i) {
+            float x = data[i];
+            if (!std::isfinite(x) || std::fabs(x) > 1e7f || (x != 0 && std::fabs(x) < 1e-6f)) return false;
+        }
+        *out = data;
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+static bool WriteArray(const Define& d, const std::vector<double>& vals) {
+    float* data = nullptr;
+    if (!LooksLikeFloatArray(d.value, vals.size(), &data)) return false;
+    for (size_t i = 0; i < vals.size(); ++i) {
+        Saved s{data + i, 0, 4};
+        memcpy(&s.bits, data + i, 4);
+        g_saved.push_back(s);
+        data[i] = (float)vals[i];
+    }
+    return true;
+}
+
+static void StripComment(char* s) {
+    if (char* c = strstr(s, "--")) *c = 0;
+}
+
+// Numbers in "{ a, b, c }"; false if anything else is in there (strings, nested tables).
+static bool ParseNumbers(const std::string& body, std::vector<double>& out) {
+    const char* p = body.c_str();
+    while (*p) {
+        if (*p == ' ' || *p == '\t' || *p == ',' || *p == '\r' || *p == '\n' || *p == '{' || *p == '}') { ++p; continue; }
+        char* end = nullptr;
+        double v = strtod(p, &end);
+        if (end == p) return false;
+        out.push_back(v);
+        p = end;
+    }
+    return !out.empty();
+}
+
+// `NDefines.<Cat>.<NAME> = <value>` lines; tables may span lines; comments start with "--".
 static void ApplyFile(const char* path, ApplyResult& r) {
     FILE* f = nullptr;
     if (fopen_s(&f, path, "rb") || !f) return;
@@ -177,8 +229,27 @@ static void ApplyFile(const char* path, ApplyResult& r) {
 
         bool ai = false;
         for (const char* c : kAICategories) ai |= strcmp(cat, c) == 0;
+        if (*p == '{') {
+            // Collect the whole table, even across lines, so we never resume mid-table.
+            StripComment(p);
+            std::string body = p;
+            int depth = 0;
+            for (char ch : body) depth += ch == '{' ? 1 : ch == '}' ? -1 : 0;
+            while (depth > 0 && fgets(line, sizeof(line), f)) {
+                StripComment(line);
+                body += line;
+                for (char* q = line; *q; ++q) depth += *q == '{' ? 1 : *q == '}' ? -1 : 0;
+            }
+            if (!ai) { ++r.ignored; continue; }
+            std::vector<double> vals;
+            auto it = g_registry.find(std::string(cat) + "." + name);
+            if (it == g_registry.end()) { ++r.skipped; continue; }
+            if (!ParseNumbers(body, vals) || !WriteArray(it->second, vals)) { ++r.tables; continue; }
+            ++r.applied;
+            ++r.arrays;
+            continue;
+        }
         if (!ai) { ++r.ignored; continue; }
-        if (*p == '{') { ++r.tables; continue; }
         double v;
         if (!strncmp(p, "true", 4)) v = 1;
         else if (!strncmp(p, "false", 5)) v = 0;
@@ -188,7 +259,7 @@ static void ApplyFile(const char* path, ApplyResult& r) {
             if (end == p) continue;
         }
         auto it = g_registry.find(std::string(cat) + "." + name);
-        if (it == g_registry.end()) { ++r.skipped; continue; }
+        if (it == g_registry.end() || it->second.type == kUnknown) { ++r.skipped; continue; }
         if (r.applied < 4) {  // a few samples so the log shows the decoding is right
             const Define& d = it->second;
             double old = d.type == kFixed ? *static_cast<int64_t*>(d.value) / (double)d.scale
