@@ -20,6 +20,7 @@
 #include <shlobj.h>
 
 #include "scan.h"
+#include "overlay.h"
 
 extern "C" void HaiThunk();
 
@@ -563,6 +564,8 @@ DWORD WINAPI InitThread(LPVOID dll_module) {
     // Optional: without it, air and navy simply run whenever the military minister does.
     InstallTheatreHooks(true);
 
+    OverlayInit();
+
     LogTail game_log;
     if (!GameLogPath(game_log.path)) Log("panel: Documents folder not found; in-game panel disabled");
     else Log("panel: watching %s", game_log.path);
@@ -571,6 +574,7 @@ DWORD WINAPI InitThread(LPVOID dll_module) {
     for (int tick = 0;; ++tick) {
         if (game_log.path[0]) PollGameLog(game_log);
         SyncHumanAIFlag();
+        OverlayTick();
         Sleep(250);
         if (tick % 4) continue;
         FILETIME now = IniWriteTime();
