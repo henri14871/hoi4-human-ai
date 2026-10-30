@@ -1,0 +1,4 @@
+native/build/
+dist/
+__pycache__/
+*.log
