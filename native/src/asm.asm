@@ -37,7 +37,7 @@ PROXY VerQueryValueW, 16
 ; ---------------------------------------------------------------------------
 ; HaiThunk: shared body for every patched AI-module vtable slot.
 ;   Entered from a per-hook stub with r10 = HookCtx* (first field = original fn).
-;   Preserves the 4 register args (int and float) across HaiShouldRun(self, ctx),
+;   Preserves the 4 register args (int and float) across HaiShouldRun(self, ctx, arg2),
 ;   then either tail-jumps to the original or returns 0 without running it.
 ; Entry: rsp = 8 mod 16. sub 88h makes it 0 mod 16 for the call.
 ; ---------------------------------------------------------------------------
@@ -54,7 +54,8 @@ HaiThunk PROC
     movups  xmmword ptr [rsp+68h], xmm2
     movups  xmmword ptr [rsp+78h], xmm3
 
-    mov     rdx, r10                ; HaiShouldRun(self = rcx, ctx = r10)
+    mov     r8, rdx                 ; HaiShouldRun(self = rcx, ctx = r10, arg2 = rdx)
+    mov     rdx, r10
     call    HaiShouldRun
     movzx   r11d, al
 

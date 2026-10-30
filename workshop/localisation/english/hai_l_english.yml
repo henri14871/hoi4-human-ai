@@ -8,7 +8,7 @@
  HAI_TO_ME_TT:0 "The AI controls this. Click to take it back."
  HAI_ALL_AI:0 "All to AI"
  HAI_ALL_ME:0 "All to me"
- HAI_FOOTER:0 "§gSaved with this campaign.§!"
+ HAI_FOOTER:0 "§gSaved with this campaign. Needs version.dll - see the mod page.§!"
  HAI_GROUP_0:0 "Government"
  HAI_FOREIGN:0 "Diplomacy"
  HAI_FOREIGN_DESC:0 "Guarantees, factions, wars, lend-lease"

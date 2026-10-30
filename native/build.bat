@@ -14,7 +14,12 @@ cd build
 
 ml64 /nologo /c /Fo asm.obj ..\src\asm.asm || exit /b 1
 cl /nologo /c /O2 /MT /EHa /std:c++17 /W4 /wd4100 /DWIN32_LEAN_AND_MEAN /DNOMINMAX ^
-   ..\src\proxy.cpp ..\src\scan.cpp ..\src\hai.cpp || exit /b 1
+   ..\src\proxy.cpp ..\src\scan.cpp ..\src\hai.cpp ..\src\defines.cpp || exit /b 1
 link /nologo /DLL /OUT:version.dll /DEF:..\src\version.def ^
-   proxy.obj scan.obj hai.obj asm.obj kernel32.lib shell32.lib ole32.lib uuid.lib || exit /b 1
+   proxy.obj scan.obj hai.obj defines.obj asm.obj kernel32.lib shell32.lib ole32.lib uuid.lib || exit /b 1
 echo Built %CD%\version.dll
+
+rem Settings window: C# 5 for the compiler that ships with Windows (.NET Framework 4.x).
+"%WINDIR%\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /nologo /target:winexe /optimize+ /platform:x64 ^
+   /out:HumanAI.exe /r:System.Windows.Forms.dll /r:System.Drawing.dll ..\..\app\HumanAI.cs || exit /b 1
+echo Built %CD%\HumanAI.exe

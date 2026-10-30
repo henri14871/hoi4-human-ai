@@ -12,7 +12,50 @@ scripted_gui = {
 					limit = { has_global_flag = hai_panel_open }
 					clr_global_flag = hai_panel_open
 				}
-				else = { set_global_flag = hai_panel_open }
+				else = {
+					set_global_flag = hai_panel_open
+					# Opening the panel makes the dll match what it shows.
+					if = {
+						limit = { has_global_flag = hai_foreign_ai }
+						log = "HAI_CMD foreign 1"
+					}
+					else = { log = "HAI_CMD foreign 0" }
+					if = {
+						limit = { has_global_flag = hai_political_ai }
+						log = "HAI_CMD political 1"
+					}
+					else = { log = "HAI_CMD political 0" }
+					if = {
+						limit = { has_global_flag = hai_interior_ai }
+						log = "HAI_CMD interior 1"
+					}
+					else = { log = "HAI_CMD interior 0" }
+					if = {
+						limit = { has_global_flag = hai_land_ai }
+						log = "HAI_CMD land 1"
+					}
+					else = { log = "HAI_CMD land 0" }
+					if = {
+						limit = { has_global_flag = hai_air_ai }
+						log = "HAI_CMD air 1"
+					}
+					else = { log = "HAI_CMD air 0" }
+					if = {
+						limit = { has_global_flag = hai_navy_ai }
+						log = "HAI_CMD navy 1"
+					}
+					else = { log = "HAI_CMD navy 0" }
+					if = {
+						limit = { has_global_flag = hai_volunteers_ai }
+						log = "HAI_CMD volunteers 1"
+					}
+					else = { log = "HAI_CMD volunteers 0" }
+					if = {
+						limit = { has_global_flag = hai_cryptology_ai }
+						log = "HAI_CMD cryptology 1"
+					}
+					else = { log = "HAI_CMD cryptology 0" }
+				}
 			}
 		}
 	}
@@ -25,8 +68,42 @@ scripted_gui = {
 		ai_enabled = { always = no }
 		effects = {
 			hai_close_click = { clr_global_flag = hai_panel_open }
-			hai_all_ai_click = { hai_set_all_ai = yes }
-			hai_all_me_click = { hai_set_all_me = yes }
+			hai_all_ai_click = {
+				set_global_flag = hai_foreign_ai
+				log = "HAI_CMD foreign 1"
+				set_global_flag = hai_political_ai
+				log = "HAI_CMD political 1"
+				set_global_flag = hai_interior_ai
+				log = "HAI_CMD interior 1"
+				set_global_flag = hai_land_ai
+				log = "HAI_CMD land 1"
+				set_global_flag = hai_air_ai
+				log = "HAI_CMD air 1"
+				set_global_flag = hai_navy_ai
+				log = "HAI_CMD navy 1"
+				set_global_flag = hai_volunteers_ai
+				log = "HAI_CMD volunteers 1"
+				set_global_flag = hai_cryptology_ai
+				log = "HAI_CMD cryptology 1"
+			}
+			hai_all_me_click = {
+				clr_global_flag = hai_foreign_ai
+				log = "HAI_CMD foreign 0"
+				clr_global_flag = hai_political_ai
+				log = "HAI_CMD political 0"
+				clr_global_flag = hai_interior_ai
+				log = "HAI_CMD interior 0"
+				clr_global_flag = hai_land_ai
+				log = "HAI_CMD land 0"
+				clr_global_flag = hai_air_ai
+				log = "HAI_CMD air 0"
+				clr_global_flag = hai_navy_ai
+				log = "HAI_CMD navy 0"
+				clr_global_flag = hai_volunteers_ai
+				log = "HAI_CMD volunteers 0"
+				clr_global_flag = hai_cryptology_ai
+				log = "HAI_CMD cryptology 0"
+			}
 			hai_foreign_to_ai_click = { set_global_flag = hai_foreign_ai log = "HAI_CMD foreign 1" }
 			hai_foreign_to_me_click = { clr_global_flag = hai_foreign_ai log = "HAI_CMD foreign 0" }
 			hai_political_to_ai_click = { set_global_flag = hai_political_ai log = "HAI_CMD political 1" }
