@@ -103,7 +103,9 @@ constexpr int kNumUpdateSlots = sizeof(kUpdateSlotLabels) / sizeof(kUpdateSlotLa
 static std::atomic<bool> g_enabled{false};
 static std::atomic<bool> g_mp_test{false};  // single-player stand-in for a multiplayer client
 static std::atomic<bool> g_pack_defines{true};  // apply the pack's AI defines
-static std::atomic<bool> g_pack_data{true};     // load the pack's strategies/templates/designs (at launch)
+// Pack AI databases, read at launch: 0 = off, 1 = all of them (single-player only: they're evaluated
+// on every machine), 2 = multiplayer-safe (strategies only, limited to human countries + our gate).
+static std::atomic<int> g_pack_data{1};
 static std::atomic<bool> g_ai_controls[kCount];
 
 static unsigned AIMask() {
@@ -143,7 +145,7 @@ static void LoadConfig() {
     g_enabled = GetPrivateProfileIntA("human_ai", "enabled", 1, ini) != 0;
     g_mp_test = GetPrivateProfileIntA("human_ai", "mp_test", 0, ini) != 0;
     g_pack_defines = GetPrivateProfileIntA("human_ai", "pack_defines", 1, ini) != 0;
-    g_pack_data = GetPrivateProfileIntA("human_ai", "pack_data", 1, ini) != 0;
+    g_pack_data = GetPrivateProfileIntA("human_ai", "pack_data", 1, ini);
     char pack[MAX_PATH] = {};
     GetPrivateProfileStringA("human_ai", "ai_pack", "", pack, MAX_PATH, ini);
     {
@@ -375,6 +377,16 @@ extern "C" bool __fastcall HaiCountryGate(void* country) {
     // Other countries: exactly the game's answer, except while we force the AI tick on a
     // client, where nobody else's AI may run.
     return g_forcing ? false : orig;
+}
+
+// Strategy updates skip human countries (`if (!IsAIControlled(c) && !g_humanAI) skip`, run in the synced
+// daily tick on every machine). In multiplayer-safe pack mode, let our own country through on this
+// PC so its AI gets strategies, including the pack's (which are limited to human countries).
+static GateFn_t g_strategy_gate_orig = nullptr;
+extern "C" bool __fastcall HaiStrategyGate(void* country) {
+    if (g_strategy_gate_orig(country)) return true;
+    return g_enabled && !g_chain_bad && g_pack_data == 2 && aidata::LoadedAny() && Multiplayer() && AIMask() &&
+           IsMine(country);
 }
 
 // On a client the AI normally never runs; force ai_update while we need it.
@@ -670,7 +682,7 @@ static void SyncPack(int role) {
     // A pack's AI strategies are part of the synced game state (checksum "AI Strategy - ..."), so
     // having loaded them at launch desyncs any multiplayer game. They can't be unloaded: warn.
     static bool warned = false;
-    bool mp_risk = (role == kRoleHost || role == kRoleClient) && aidata::LoadedAny();
+    bool mp_risk = (role == kRoleHost || role == kRoleClient) && aidata::LoadedAny() && g_pack_data == 1;
     if (mp_risk != warned) {
         warned = mp_risk;
         char path[MAX_PATH];
@@ -807,6 +819,17 @@ static bool InstallMultiplayerHooks(bool patch) {
     }
     Log("mp: %d AI post call sites %s, country gate %s", sites, patch ? "patched" : "found (dry run)",
         patch ? "patched" : "found");
+
+    // Strategy update skip for human countries:
+    //   mov rcx,rbx ; call <IsAIControlled> ; test al,al ; jne ; cmp [g_humanAI],al ; jne ; mov dword [rsi+X],1
+    for (uint8_t* h : scan::find(img.text, "48 8B CB E8 ?? ?? ?? ?? 84 C0 75 ?? 38 05 ?? ?? ?? ?? 75 ?? C7 86 ?? ?? 00 00 01 00 00 00")) {
+        if (scan::rel32(h + 14) != g_humanAI) continue;
+        g_strategy_gate_orig = reinterpret_cast<GateFn_t>(scan::rel32(h + 4));
+        bool ok = !patch || PatchCall(h + 3, MakeStubTo(nullptr, (void*)&HaiStrategyGate));
+        Log("mp: strategy gate +%#llx %s", h + 3 - img.base, ok ? (patch ? "patched" : "found") : "NOT patched");
+        if (!ok) g_strategy_gate_orig = nullptr;
+        break;
+    }
     g_mp_ready = patch;
     return true;
 }
@@ -948,7 +971,8 @@ DWORD WINAPI InitThread(LPVOID dll_module) {
             pack = g_pack;
         }
         if (!g_pack_data) pack.clear();  // pack_data=0: don't load the pack's AI databases
-        if (!pack.empty() && !aidata::InstallPackLoaders(std::string(g_dir) + "\\human_ai_packs\\" + pack))
+        if (!pack.empty() && !aidata::InstallPackLoaders(std::string(g_dir) + "\\human_ai_packs\\" + pack, true,
+                                                        g_pack_data == 2))
             Log("aidata: pack '%s' strategies/templates can't be loaded on this game version", pack.c_str());
     }
     if (!Resolve() || !InstallHooks()) {
@@ -1004,7 +1028,7 @@ extern "C" __declspec(dllexport) int HaiSelfTest(const char* exe_path, const cha
     // Optional: HAI_TEST_PACK=<folder> also parses a pack against the mapped image.
     char pack[MAX_PATH];
     if (ok && GetEnvironmentVariableA("HAI_TEST_PACK", pack, MAX_PATH)) {
-        aidata::InstallPackLoaders(pack, false);
+        aidata::InstallPackLoaders(pack, false, GetEnvironmentVariableA("HAI_TEST_SCOPED", nullptr, 0) > 0);
         defines::ApplyResult r = defines::ApplyPack(pack, true);
         Log("self-test pack: %d applied, %d not found, %d gameplay ignored, %d arrays", r.applied, r.skipped,
             r.ignored, r.tables);

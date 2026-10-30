@@ -164,7 +164,50 @@ static int Expand(std::string& s, const std::map<std::string, std::string>& trig
     return replaced;
 }
 
-std::string PreparePack(const std::string& pack_dir, const char* const* folders, int nfolders) {
+// Add `is_ai = no` to each top-level entry's `allowed` block (creating it if missing). AI strategies
+// are evaluated on every machine as part of the synced game state; with this, AI nations on this PC
+// evaluate exactly the vanilla set, and only human countries can use the pack's entries. The game
+// doesn't update human countries' strategies, except ours via the strategy gate in hai.cpp.
+static int ScopeToHuman(std::string& s) {
+    int scoped = 0;
+    size_t i = 0;
+    while ((i = SkipSpace(s, i)) < s.size()) {
+        size_t start = i;
+        while (i < s.size() && IsIdent(s[i])) ++i;
+        if (i == start) { ++i; continue; }
+        i = SkipSpace(s, i);
+        if (i >= s.size() || s[i] != '=') continue;
+        i = SkipSpace(s, i + 1);
+        if (i >= s.size() || s[i] != '{') continue;
+        size_t open = i, end = MatchBrace(s, i);
+        if (end == std::string::npos) break;
+        // Look for a direct child `allowed = {`.
+        size_t j = open + 1, insert_at = std::string::npos;
+        int depth = 0;
+        while (j + 1 < end) {
+            char c = s[j];
+            if (c == '#') { while (j < end && s[j] != '\n') ++j; continue; }
+            if (c == '"') { for (++j; j < end && s[j] != '"'; ++j) {} ++j; continue; }
+            if (c == '{') { ++depth; ++j; continue; }
+            if (c == '}') { --depth; ++j; continue; }
+            if (depth == 0 && s.compare(j, 7, "allowed") == 0 && !IsIdent(s[j - 1]) && !IsIdent(s[j + 7])) {
+                size_t k = SkipSpace(s, j + 7);
+                if (k < end && s[k] == '=') {
+                    k = SkipSpace(s, k + 1);
+                    if (k < end && s[k] == '{') { insert_at = k + 1; break; }
+                }
+            }
+            ++j;
+        }
+        std::string add = insert_at != std::string::npos ? " is_ai = no " : "\n\tallowed = { is_ai = no }\n";
+        s.insert(insert_at != std::string::npos ? insert_at : open + 1, add);
+        ++scoped;
+        i = end + add.size();
+    }
+    return scoped;
+}
+
+std::string PreparePack(const std::string& pack_dir, const char* const* folders, int nfolders, bool scoped) {
     std::map<std::string, std::string> triggers;
     std::string tdir = pack_dir + "\\common\\scripted_triggers";
     for (auto& f : ListFiles(tdir, "*.txt")) ParseTriggers(ReadFile(tdir + "\\" + f), triggers);
@@ -172,7 +215,7 @@ std::string PreparePack(const std::string& pack_dir, const char* const* folders,
     std::string root = pack_dir + "\\.hai";
     CreateDirectoryA(root.c_str(), nullptr);
     CreateDirectoryA((root + "\\common").c_str(), nullptr);
-    int files = 0, calls = 0, params = 0;
+    int files = 0, calls = 0, params = 0, entries = 0;
     for (int k = 0; k < nfolders; ++k) {
         std::string src = pack_dir + "\\common\\" + folders[k];
         std::string dst = root + "\\common\\" + folders[k];
@@ -187,12 +230,14 @@ std::string PreparePack(const std::string& pack_dir, const char* const* folders,
                 calls += n;
                 if (!n) break;
             }
+            if (scoped) entries += ScopeToHuman(text);
             if (WriteFile(dst + "\\" + f, text)) ++files;
         }
     }
     hai::Log("prepare: %zu pack scripted triggers; %d AI files prepared, %d trigger calls expanded, %d with "
              "parameters left as is",
              triggers.size(), files, calls, params);
+    if (scoped) hai::Log("prepare: multiplayer-safe: %d entries limited to human countries (is_ai = no)", entries);
     return root;
 }
 

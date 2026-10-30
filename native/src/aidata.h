@@ -9,7 +9,9 @@ namespace aidata {
 // Must run before the loading screen reaches the AI databases. Does nothing (and
 // installs nothing) if the pack has none of the supported folders.
 // With patch=false only the lookups run (self-test).
-bool InstallPackLoaders(const std::string& pack_dir, bool patch = true);
+// scoped (multiplayer-safe mode): load only the pack's strategies, each limited to human countries
+// (see prepare.h), so AI nations evaluate exactly what every other machine does.
+bool InstallPackLoaders(const std::string& pack_dir, bool patch = true, bool scoped = false);
 
 // True once any pack folder was loaded into the game's databases this session. AI strategies are
 // evaluated on every machine (their values are in the synced checksum), so this desyncs multiplayer.

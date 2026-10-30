@@ -113,7 +113,7 @@ class SettingsForm : Form {
     readonly CheckBox enabledBox, topBox;
     readonly Label statusLabel, packLabel;
     readonly ComboBox packBox;
-    readonly CheckBox dataBox;
+    readonly ComboBox dataBox;
     readonly string packsDir;
     readonly System.Windows.Forms.Timer timer;
     DateTime iniTime;
@@ -189,15 +189,21 @@ class SettingsForm : Form {
         packLabel.Size = new Size(348, 50);
         Controls.Add(packLabel);
         y += 54;
-        dataBox = new CheckBox { Text = "Also its strategies, templates and designs\n(single-player only, restart to apply)",
-                                 Location = new Point(16, y), Size = new Size(348, 36), ForeColor = CMuted };
-        dataBox.CheckedChanged += delegate {
+        // pack_data: 0 off, 1 everything (single-player only), 2 multiplayer-safe strategies for your AI.
+        dataBox = new ComboBox { Location = new Point(16, y), Width = 348, DropDownStyle = ComboBoxStyle.DropDownList,
+                                 BackColor = CPanel, ForeColor = CText, FlatStyle = FlatStyle.Flat };
+        dataBox.Items.Add("Strategies, templates, designs: off");
+        dataBox.Items.Add("All of them (single-player only)");
+        dataBox.Items.Add("Strategies for your AI only (multiplayer-safe)");
+        dataBox.SelectedIndexChanged += delegate {
             if (loading) return;
-            Ini.Set(ini, "human_ai", "pack_data", dataBox.Checked ? "1" : "0");
+            Ini.Set(ini, "human_ai", "pack_data", dataBox.SelectedIndex.ToString());
             iniTime = File.Exists(ini) ? File.GetLastWriteTimeUtc(ini) : DateTime.MinValue;
         };
         Controls.Add(dataBox);
-        y += 42;
+        y += 30;
+        Controls.Add(MakeLabel("Takes effect when you restart the game.", 16, y, new Font("Segoe UI", 8.5f), CMuted));
+        y += 24;
 
         topBox = new CheckBox { Text = "Keep on top of the game", Location = new Point(16, y), AutoSize = true, ForeColor = CMuted };
         topBox.CheckedChanged += delegate {
@@ -329,7 +335,8 @@ class SettingsForm : Form {
         enabledBox.Checked = Ini.Int(ini, "human_ai", "enabled", 1) != 0;
         foreach (var kv in toggles) ShowState(kv.Value, Ini.Int(ini, "human_ai", kv.Key, 0) != 0);
         topBox.Checked = Ini.Int(ini, "app", "keep_on_top", 1) != 0;
-        dataBox.Checked = Ini.Int(ini, "human_ai", "pack_data", 1) != 0;
+        int mode = Ini.Int(ini, "human_ai", "pack_data", 1);
+        dataBox.SelectedIndex = mode < 0 || mode > 2 ? 1 : mode;
         TopMost = topBox.Checked;
         loading = false;
         iniTime = File.Exists(ini) ? File.GetLastWriteTimeUtc(ini) : DateTime.MinValue;
@@ -358,8 +365,8 @@ class SettingsForm : Form {
         }
 
         if (Ini.Int(statusIni, "pack", "mp_warning", 0) != 0 && Ini.Int(statusIni, "status", "pid", 0) == game.Id) {
-            packLabel.Text = "Multiplayer with the pack's strategies loaded: this will desync. Untick them below "
-                           + "and restart the game before playing online.";
+            packLabel.Text = "Multiplayer with all of the pack's strategies loaded: this will desync. Choose "
+                           + "\"Strategies for your AI only\" below and restart the game before playing online.";
             packLabel.ForeColor = CBad;
         } else {
             packLabel.ForeColor = CMuted;

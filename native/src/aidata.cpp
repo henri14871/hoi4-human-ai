@@ -26,6 +26,9 @@ extern "C" void HaiDbThunk();  // asm.asm: r10 = DbHook*, tail-jumps to HaiDbLoa
 namespace aidata {
 
 // Folders we add from a pack. Read only by the AI, so they can't desync multiplayer.
+// Multiplayer-safe mode: only strategies, which can be scoped to human countries via `allowed`.
+static const char* const kScopedFolders[] = {"ai_strategy", "ai_strategy_plans"};
+static bool g_scoped = false;
 static const char* const kFolders[] = {"ai_strategy", "ai_strategy_plans", "ai_templates", "ai_equipment",
                                        "ai_areas"};
 
@@ -80,7 +83,8 @@ extern "C" void __fastcall HaiDbLoad(void* db, void* path, DbHook* hook) {
     if (!p || strncmp(p, "common/", 7) != 0) return;
     const char* folder = p + 7;
     bool ours = false;
-    for (const char* f : kFolders) ours |= strcmp(folder, f) == 0;
+    if (g_scoped) for (const char* f : kScopedFolders) ours |= strcmp(folder, f) == 0;
+    else for (const char* f : kFolders) ours |= strcmp(folder, f) == 0;
     if (!ours || !PackHas(folder) || !MountPack()) return;
 
     char vpath[128];
@@ -118,13 +122,19 @@ static void* MakeDbStub(DbHook* h) {
     return s;
 }
 
-bool InstallPackLoaders(const std::string& pack_dir, bool patch) {
+bool InstallPackLoaders(const std::string& pack_dir, bool patch, bool scoped) {
+    g_scoped = scoped;
     using scan::img;
     g_pack_dir = pack_dir;
     int wanted = 0;
-    for (const char* f : kFolders) wanted += PackHas(f) ? 1 : 0;
+    for (const char* f : kFolders) {
+        bool use = !scoped || !strcmp(f, kScopedFolders[0]) || !strcmp(f, kScopedFolders[1]);
+        wanted += use && PackHas(f) ? 1 : 0;
+    }
     if (!wanted && patch) return true;  // nothing to load: install nothing
-    if (wanted) g_mount_root = prepare::PreparePack(pack_dir, kFolders, (int)(sizeof(kFolders) / sizeof(kFolders[0])));
+    if (wanted)
+        g_mount_root = scoped ? prepare::PreparePack(pack_dir, kScopedFolders, 2, true)
+                              : prepare::PreparePack(pack_dir, kFolders, (int)(sizeof(kFolders) / sizeof(kFolders[0])));
 
     PhysfsMount = reinterpret_cast<Mount_t>(GetProcAddress((HMODULE)img.base, "?PHYSFS_mount@@YAHPEBD0H@Z"));
 
