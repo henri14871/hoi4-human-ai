@@ -114,6 +114,13 @@ checked in a running game; the self-test reports them as not applicable.
   `hai_pack/common/<folder>` into the same database before it's linked.
 - **Install order:** these hooks go in first at startup, and only when the selected pack has one of
   those folders.
+- **Prepare step** (`src/prepare.cpp`): before mounting, the pack's AI folders are copied to
+  `<pack>\.hai\common\`. Each call to one of the pack's scripted triggers (`name = yes|no`) is
+  replaced by the trigger's body (`AND = { … }`, or `NOT = { AND = { … } }`), repeated so triggers
+  calling triggers expand too. `<pack>\.hai` is what gets mounted. The game's trigger database is
+  never touched, so a pack can't redefine a vanilla trigger. Triggers with `$PARAMS$` are left as
+  is. Tested with Frontline AI + AI Divisions + AI Designs: 91 triggers, 58 files, 245 calls
+  expanded, all braces balanced.
 
 The self-test parses a pack too. Set `HAI_TEST_PACK=<pack folder>` before running it.
 On 1.19.4.1 it finds 4,489 defines, matching the game's own "4489 defines loaded".

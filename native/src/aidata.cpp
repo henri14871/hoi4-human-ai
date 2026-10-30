@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "hai.h"
+#include "prepare.h"
 #include "scan.h"
 
 extern "C" void HaiDbThunk();  // asm.asm: r10 = DbHook*, tail-jumps to HaiDbLoad
@@ -38,6 +39,7 @@ struct DbHook {
 };
 
 static std::string g_pack_dir;
+static std::string g_mount_root;  // <pack>\.hai: AI folders with the pack's scripted triggers expanded
 static StrCtor_t StrCtor = nullptr;
 static StrDtor_t StrDtor = nullptr;
 static Mount_t PhysfsMount = nullptr;
@@ -61,10 +63,10 @@ static bool MountPack() {
     if (mounted >= 0) return mounted == 1;
     wchar_t wide[MAX_PATH];
     char utf8[MAX_PATH * 3];
-    MultiByteToWideChar(CP_ACP, 0, g_pack_dir.c_str(), -1, wide, MAX_PATH);
+    MultiByteToWideChar(CP_ACP, 0, g_mount_root.c_str(), -1, wide, MAX_PATH);
     WideCharToMultiByte(CP_UTF8, 0, wide, -1, utf8, sizeof(utf8), nullptr, nullptr);
     mounted = PhysfsMount(utf8, "hai_pack", 1) ? 1 : 0;
-    hai::Log("aidata: mount %s as hai_pack/: %s", g_pack_dir.c_str(), mounted ? "ok" : "FAILED");
+    hai::Log("aidata: mount %s as hai_pack/: %s", g_mount_root.c_str(), mounted ? "ok" : "FAILED");
     return mounted == 1;
 }
 
@@ -118,6 +120,7 @@ bool InstallPackLoaders(const std::string& pack_dir, bool patch) {
     int wanted = 0;
     for (const char* f : kFolders) wanted += PackHas(f) ? 1 : 0;
     if (!wanted && patch) return true;  // nothing to load: install nothing
+    if (wanted) g_mount_root = prepare::PreparePack(pack_dir, kFolders, (int)(sizeof(kFolders) / sizeof(kFolders[0])));
 
     PhysfsMount = reinterpret_cast<Mount_t>(GetProcAddress((HMODULE)img.base, "?PHYSFS_mount@@YAHPEBD0H@Z"));
 

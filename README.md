@@ -56,8 +56,13 @@ What Human AI takes from a pack:
   events, scripted effects and modifiers. One-sided, they would desync a multiplayer game.
 - **Who it affects:** in single-player, and when you host, the game runs every AI nation on your PC,
   so they use the pack too. As a multiplayer client, only your own country's AI runs on your PC.
+- **Scripted triggers:** AI files that call the pack's own scripted triggers work. Human AI expands
+  those calls inline into a prepared copy (`<pack>\.hai\`) instead of adding triggers to the game.
 - Strategies that depend on flags the pack's own scripts would set do nothing, because those
   scripts aren't run. For Frontline AI that's its crisis-detection strategies.
+- **Combining mods:** one pack can hold several AI mods. Copy them into the same folder, as long as
+  their file names don't clash. Example: *Better Mechanics: Frontline AI*, *AI Divisions* and
+  *AI Designs* together.
 
 ## Install
 
