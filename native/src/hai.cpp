@@ -101,6 +101,7 @@ constexpr int kNumUpdateSlots = sizeof(kUpdateSlotLabels) / sizeof(kUpdateSlotLa
 // Config (hoi4 folder\human_ai.ini), hot-reloaded.
 // ---------------------------------------------------------------------------
 static std::atomic<bool> g_enabled{false};
+static std::atomic<bool> g_mp_test{false};  // single-player stand-in for a multiplayer client
 static std::atomic<bool> g_ai_controls[kCount];
 
 static unsigned AIMask() {
@@ -138,6 +139,7 @@ static void LoadConfig() {
     char ini[MAX_PATH];
     IniPath(ini);
     g_enabled = GetPrivateProfileIntA("human_ai", "enabled", 1, ini) != 0;
+    g_mp_test = GetPrivateProfileIntA("human_ai", "mp_test", 0, ini) != 0;
     char pack[MAX_PATH] = {};
     GetPrivateProfileStringA("human_ai", "ai_pack", "", pack, MAX_PATH, ini);
     {
@@ -150,7 +152,8 @@ static void LoadConfig() {
         sprintf_s(line + strlen(line), sizeof(line) - strlen(line), " %s=%d", kCategoryKeys[c],
                   (int)g_ai_controls[c].load());
     }
-    Log("%s enabled=%d ai_pack=%s", line, (int)g_enabled.load(), pack[0] ? pack : "(none)");
+    Log("%s enabled=%d ai_pack=%s%s", line, (int)g_enabled.load(), pack[0] ? pack : "(none)",
+        g_mp_test ? " mp_test=1" : "");
 }
 
 static FILETIME IniWriteTime() {
@@ -315,9 +318,18 @@ static int CountryTag(void* country) {
     return *reinterpret_cast<int32_t*>((uint8_t*)country + kCountryTagOffset);
 }
 
+// Multiplayer test mode (mp_test=1, single-player only): your country's AI runs exactly as it
+// would on a multiplayer client (no global human_ai switch, multiplayer-safe pack defines), but
+// every command it posts is dropped. Anything that still changes the game state is a side
+// effect that would desync a real multiplayer game; compare checksums to find it.
+static bool TestMode() { return g_mp_ready && g_mp_test && g_role == kRoleSingle; }
+
 static bool IsMine(void* country) {
+    if (!country) return false;
+    // Single-player has no player tag; the human country is the one that isn't AI.
+    if (TestMode()) return !IsAITag(*g_gamestate, (uint8_t*)country + kCountryTagOffset);
     int tag = g_mine_tag;
-    return country && tag != 0 && CountryTag(country) == tag;
+    return tag != 0 && CountryTag(country) == tag;
 }
 
 // Called from our own thread every 250 ms.
@@ -346,15 +358,17 @@ static void UpdateRole() {
 
 static bool Multiplayer() {
     int r = g_role;
-    return g_mp_ready && (r == kRoleHost || r == kRoleClient);
+    return g_mp_ready && (r == kRoleHost || r == kRoleClient || TestMode());
 }
+
+static bool HostLike() { return g_role == kRoleHost || TestMode(); }  // runs the AI countries' AI
 
 // Replaces the "is AI (or human_ai)" call at the top of CCountryAI::Update.
 extern "C" bool __fastcall HaiCountryGate(void* country) {
     bool orig = g_gate_orig(country);
     if (!g_enabled || g_chain_bad || !Multiplayer()) return orig;
     if (IsMine(country)) return AIMask() != 0;
-    return g_role == kRoleHost ? orig : false;
+    return HostLike() ? orig : false;
 }
 
 // On a client the AI normally never runs; force ai_update while we need it.
@@ -383,9 +397,15 @@ static void SyncScheduler() {
 }
 
 static bool ShouldPost(void* cmd, void* posting) {
-    if (!g_enabled || g_role != kRoleClient || !g_mp_ready) return true;
+    if (!g_enabled || !g_mp_ready || (g_role != kRoleClient && !TestMode())) return true;
     void* country = nullptr;
     __try { country = PostingCountry(posting); } __except (EXCEPTION_EXECUTE_HANDLER) { country = nullptr; }
+    if (TestMode()) {
+        if (!IsMine(country)) return true;
+        if (g_dropped++ < 20)
+            Log("mp test: dropped own AI command %s", scan::class_name(cmd) ? scan::class_name(cmd) : "?");
+        return false;
+    }
     if (IsMine(country)) return true;
     if (g_dropped++ < 20)
         Log("mp: dropped AI command %s for another country (%p)", scan::class_name(cmd) ? scan::class_name(cmd) : "?",
@@ -403,15 +423,15 @@ extern "C" bool HaiShouldRun(void* self, HookCtx* ctx, void* arg2) {
     bool run;
     if (Multiplayer()) {
         if (IsMine(country)) run = (AIMask() & ctx->mask) != 0;
-        else run = g_role == kRoleHost && ai_country;  // a client never runs anyone else's AI
+        else run = HostLike() && ai_country;  // a client never runs anyone else's AI
     } else {
         run = ai_country || (AIMask() & ctx->mask);
     }
     if (first) {
         char cats[96];
         MaskNames(ctx->mask, cats, sizeof(cats));
-        Log("first call %s slot %d (%s): %s ai_country=%d mine=%d run=%d", ctx->name, ctx->slot, cats,
-            kRoleNames[g_role.load()], ai_country, IsMine(country), run);
+        Log("first call %s slot %d (%s): %s%s ai_country=%d mine=%d run=%d", ctx->name, ctx->slot, cats,
+            kRoleNames[g_role.load()], TestMode() ? " (mp test)" : "", ai_country, IsMine(country), run);
     }
     return run;
 }
@@ -629,6 +649,7 @@ static void WritePackStatus(const std::string& pack, const defines::ApplyResult&
 static void SyncPack(int role) {
     static std::string applied;
     static bool in_game = false;
+    static bool applied_mp = false;
     if (!g_defines_ready) return;
     std::string want;
     {
@@ -636,23 +657,25 @@ static void SyncPack(int role) {
         want = g_pack;
     }
     bool game = role != kRoleNone;
-    if (game == in_game && want == applied) return;
+    bool mp = Multiplayer();  // includes mp_test
+    if (game == in_game && want == applied && (!game || mp == applied_mp)) return;
     if (!game) {  // only apply inside a game; the game reads its defines at startup
         in_game = false;
         return;
     }
     in_game = true;
     applied = want;
+    applied_mp = mp;
     if (want.empty()) {
         defines::Restore();
         WritePackStatus("", {});
         return;
     }
     std::string dir = std::string(g_dir) + "\\human_ai_packs\\" + want;
-    defines::ApplyResult r = defines::ApplyPack(dir);
-    Log("pack '%s': %d AI defines applied (%d arrays), %d not in this game version, %d gameplay defines ignored, "
-        "%d arrays not applicable",
-        want.c_str(), r.applied, r.arrays, r.skipped, r.ignored, r.tables);
+    defines::ApplyResult r = defines::ApplyPack(dir, mp);
+    Log("pack '%s'%s: %d AI defines applied (%d arrays), %d skipped as multiplayer-unsafe, %d not in this game "
+        "version, %d gameplay defines ignored, %d arrays not applicable",
+        want.c_str(), mp ? " (multiplayer)" : "", r.applied, r.arrays, r.mp_unsafe, r.skipped, r.ignored, r.tables);
     WritePackStatus(want, r);
 }
 
@@ -768,7 +791,7 @@ static bool InstallMultiplayerHooks(bool patch) {
 // least one category is handed to the AI, and never in multiplayer (it desyncs).
 static void SyncHumanAIFlag() {
     int role = g_role;
-    bool single = role == kRoleSingle || (!g_mp_ready && role != kRoleNone);
+    bool single = (role == kRoleSingle && !TestMode()) || (!g_mp_ready && role != kRoleNone);
     uint8_t want = (single && g_enabled && !g_chain_bad && AIMask()) ? 1 : 0;
     if (*g_humanAI != want) {
         *g_humanAI = want;
@@ -957,7 +980,7 @@ extern "C" __declspec(dllexport) int HaiSelfTest(const char* exe_path, const cha
     char pack[MAX_PATH];
     if (ok && GetEnvironmentVariableA("HAI_TEST_PACK", pack, MAX_PATH)) {
         aidata::InstallPackLoaders(pack, false);
-        defines::ApplyResult r = defines::ApplyPack(pack);
+        defines::ApplyResult r = defines::ApplyPack(pack, true);
         Log("self-test pack: %d applied, %d not found, %d gameplay ignored, %d arrays", r.applied, r.skipped,
             r.ignored, r.tables);
         defines::Restore();

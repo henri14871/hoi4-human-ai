@@ -14,11 +14,14 @@ struct ApplyResult {
     int arrays = 0;    // of which arrays
     int skipped = 0;   // AI defines the game doesn't have (stale or renamed)
     int ignored = 0;   // non-AI defines (gameplay), never applied
+    int mp_unsafe = 0; // AI defines also read by the simulation: skipped in multiplayer
     int tables = 0;    // array values that could not be applied (different length or not numbers)
 };
 
 // Apply pack_dir\common\defines\*.lua. Restores any previous pack first.
-ApplyResult ApplyPack(const std::string& pack_dir);
+// multiplayer: only apply defines on the AI-only allowlist (ai_only_defines.inc), since a define
+// the simulation also reads would desync a multiplayer game if only one machine changed it.
+ApplyResult ApplyPack(const std::string& pack_dir, bool multiplayer);
 // Put back the game's own values.
 void Restore();
 

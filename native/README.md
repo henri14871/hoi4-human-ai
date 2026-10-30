@@ -104,6 +104,33 @@ xmm,[rax+4]`). A pack array is written only if the game's array has the same len
 current values really are floats, so int arrays are refused, not corrupted. Arrays can only be
 checked in a running game; the self-test reports them as not applicable.
 
+**Multiplayer-safe defines:** some `NAI` defines are also read by simulation code. For example,
+`DEFAULT_SUPPLY_TRAIN_NEED_FACTOR` is read by `CGameState::MonthlyUpdate`, and changing it on one
+PC desynced the supply cache. `tools/define_users.py` classifies every `NAI`/`NAITheatre` define by
+who reads it:
+- **Method:** it finds the functions that read each define's value, walks their callers up four
+  levels to the classes that own them (RTTI), and labels each owner.
+- **Labels:** AI classes (`…AI`, `CAI…`, ministers, generals) and display classes (`…Item`,
+  `…View`, `…Window`, tooltips, portraits, the top bar) are safe. Anything else is "sim" (for
+  example `COrdersGroup`, `CInGameIdler`, diplomatic actions, `CGameState`). No owner found counts
+  as "unknown".
+- **Use:** only "ai" defines go into `src/ai_only_defines.inc`, which is compiled into the DLL. In
+  multiplayer and in `mp_test`, packs apply only those. Single-player applies everything.
+- **Results on 1.19.4.1:** 551 ai, 181 sim, 231 unknown. Frontline AI keeps 309 of its 547 AI
+  settings in multiplayer.
+
+Regenerate it after a game update. It takes a few minutes:
+
+```bash
+py native/tools/define_users.py --inc native/src/ai_only_defines.inc
+```
+
+**Multiplayer test mode** (`mp_test=1`, single-player only): your country's AI runs as on a
+client (no global `human_ai`, per-country gate, multiplayer-safe defines), while every command it
+posts is dropped. Comparing `dump_checksum` / `compare_to_last_checksum` between a run with your
+areas off and one with them on shows any side effect that would desync a real game. See the main
+README for the steps.
+
 **AI database folders** (`src/aidata.cpp`):
 - **Finding the loaders:** the loading screen loads each AI folder with `lea rdx,"common/<folder>" ;
   call <string ctor> ; call <db wrapper> ; call <string dtor>`. Each wrapper stores the folder,
@@ -143,6 +170,7 @@ volunteers=0
 cryptology=0
 launch_app=1   ; open HumanAI.exe when the game starts
 ai_pack=       ; folder in human_ai_packs, empty = vanilla AI
+mp_test=0      ; 1 = single-player stand-in for a multiplayer client (see README)
 
 [app]          ; written by HumanAI.exe
 keep_on_top=1

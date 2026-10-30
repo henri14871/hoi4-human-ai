@@ -63,6 +63,26 @@ What Human AI takes from a pack:
 - **Combining mods:** one pack can hold several AI mods. Copy them into the same folder, as long as
   their file names don't clash. Example: *Better Mechanics: Frontline AI*, *AI Divisions* and
   *AI Designs* together.
+- **In multiplayer** (host or client), only AI settings that the AI alone reads are applied. Some
+  `NAI` settings are also read by the game's simulation: for example
+  `DEFAULT_SUPPLY_TRAIN_NEED_FACTOR` is read by the monthly update, and changing it on one PC
+  desynced the supply cache. Those are skipped, and the log counts them as "multiplayer-unsafe".
+
+## Testing multiplayer on your own
+
+You can check for desync causes without a second player:
+1. Set `mp_test=1` in `human_ai.ini` and load a **single-player** save. Your country's AI now runs
+   exactly as it would on a multiplayer client, but every command it posts is dropped, so nothing it
+   decides takes effect.
+2. With every area set to **You**, unpause for one in-game week, pause, and type `dump_checksum` in
+   the console (press `` ` `` to open it).
+3. Load the same save again, set the areas you want to test to **AI** (and your pack), run the same
+   week, pause, and type `compare_to_last_checksum`.
+
+If the checksums match, your AI has no hidden side effects, and it should stay in sync online. If
+they differ, the console names the part of the game that changed (such as the supply cache): send
+that and `human_ai.log`. To rule out ordinary single-player randomness, run step 3 once with every
+area still on **You** as well. If that already differs, compare against that run instead.
 
 ## Install
 

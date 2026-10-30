@@ -1,0 +1,123 @@
+"""Classify NAI/NAITheatre defines by who reads them: AI code only, or also simulation code.
+
+For each define's value address, find the functions that read it, walk callers (direct calls)
+up to --depth levels to functions that sit in a vtable, and record the owning RTTI classes.
+A define is "ai" when every owner found is an AI class, "sim" when any owner is not, and
+"unknown" when no owner was found within the depth.
+
+usage: py native/tools/define_users.py [--depth 4] [--names NAME ...] [--out file] [--inc file]
+Regenerate the dll allowlist after a game update:
+  py native/tools/define_users.py --inc native/src/ai_only_defines.inc
+"""
+import argparse, re, struct
+from collections import defaultdict, deque
+from pe import Image
+
+ap = argparse.ArgumentParser()
+ap.add_argument("--depth", type=int, default=4)
+ap.add_argument("--names", nargs="*")
+ap.add_argument("--out")
+ap.add_argument("--inc", help="write native/src/ai_only_defines.inc for the dll")
+args = ap.parse_args()
+img = Image()
+T, B = img.text, img.text_rva
+R = img.sections[".rdata"]; R0, R1 = R.VirtualAddress, R.VirtualAddress + R.Misc_VirtualSize
+def rel(r): return r + 4 + struct.unpack_from("<i", img.data, r)[0]
+
+def col_name(col):
+    if not (R0 <= col < R1): return None
+    sig, off, _, td, _, me = struct.unpack_from("<IIIIII", img.data, col)
+    if sig != 1 or me != col: return None
+    n = img.read_cstr(td + 16)
+    return n[4:-2] if n.startswith(".?A") else None
+
+vt_owner = defaultdict(set)
+for off in range(R0, R1 - 16, 8):
+    p = struct.unpack_from("<Q", img.data, off)[0] - img.base
+    name = col_name(p) if R0 <= p < R1 else None
+    if not name: continue
+    i = off + 8
+    while i < R1:
+        q = struct.unpack_from("<Q", img.data, i)[0] - img.base
+        if not (B <= q < B + len(T)): break
+        vt_owner[q].add(name); i += 8
+
+callers = defaultdict(list)
+for m in re.finditer(rb"\xe8", T):
+    o = m.start()
+    if o + 5 <= len(T): callers[B + o + 5 + struct.unpack_from("<i", T, o + 1)[0]].append(B + o)
+
+def fstart(rva):
+    f = img.primary_func(rva)
+    if f: return f[0]
+    s = rva
+    while s > 0 and not (img.data[s - 1] == 0xCC and img.data[s - 2] == 0xCC): s -= 1
+    return s
+
+import functools, sys
+sys.setrecursionlimit(10000)
+_fs = {}
+def fstart_c(rva):
+    if rva not in _fs: _fs[rva] = fstart(rva)
+    return _fs[rva]
+
+@functools.lru_cache(maxsize=None)
+def owners_at(f, remaining):
+    if f in vt_owner: return frozenset(vt_owner[f])
+    if remaining == 0: return frozenset()
+    out = set()
+    for c in callers.get(f, [])[:64]:  # very widely called helpers aren't informative
+        out |= owners_at(fstart_c(c), remaining - 1)
+        if len(out) > 40: break
+    return frozenset(out)
+
+def owners(fn):
+    return set(owners_at(fn, args.depth))
+
+# Owners that can't desync multiplayer: AI code (runs on one machine and acts through commands)
+# and UI code (only displays values).
+AI = re.compile(r"(AI(?![a-z])|Ai[A-Z]|Minister|General(?!Production)|lambda_\d+>@\?\d+\?\?\w*AI)")
+UI = re.compile(r"(Item|View|Window|Dialog|Button|Entry|Tooltip|Panel|Popup|Gui|Interface|MapMode|Icon|Widget|"
+                r"Controller|Listbox|Ledger|Overview|Screen|Frontend|Notification|Alert|Outliner|Renderer|"
+                r"Effect@@|Trigger|DefinesReloader|Portrait|TopBar)(@|$)")
+def safe(o): return bool(AI.search(o) or UI.search(o))
+# registration: lea r8,[var] ; lea rdx,"NAME"   (category from the nearest preceding lea rdx,"N...")
+defs = {}
+for m in re.finditer(rb"\x4c\x8d\x05(....)\x48\x8d\x15(....)", T, re.S):
+    o = m.start(); name = img.read_cstr(rel(B + o + 10), 100)
+    if not re.fullmatch(r"[A-Z][A-Z0-9_]{2,}", name or ""): continue
+    cat = None
+    for q in range(o - 3, max(o - 0x300, 0), -1):
+        if T[q] == 0xCC and T[q + 1] == 0xCC: break
+        if T[q:q + 3] == b"\x48\x8d\x15":
+            s = img.read_cstr(rel(B + q + 3), 40)
+            if re.fullmatch(r"N[A-Z][A-Za-z]+", s or "") and s != "NDefines": cat = s; break
+    if cat in ("NAI", "NAITheatre"): defs.setdefault(name, (cat, rel(B + o + 3), B + o))
+names = args.names or sorted(defs)
+out = []
+for n in names:
+    if n not in defs: continue
+    cat, var, reg = defs[n]
+    readers = {fstart(x) for x in img.rip_xrefs(var) if fstart(x) != fstart(reg)}
+    own = set()
+    for r in readers: own |= owners(r)
+    nonai = sorted(o for o in own if not safe(o))
+    kind = "unknown" if not own else ("ai" if not nonai else "sim")
+    out.append((n, kind, nonai[:4], len(readers)))
+for n, kind, nonai, k in out:
+    if args.names or kind != "ai": print(f"{kind:7} {n:50} readers={k} non-AI owners={nonai}")
+from collections import Counter
+print("summary:", Counter(k for _, k, _, _ in out))
+if args.out:
+    with open(args.out, "w") as f:
+        for n, kind, _, _ in out:
+            if kind == "ai": f.write(n + "\n")
+if args.inc:
+    import datetime
+    with open(args.inc, "w", newline="\n") as f:
+        f.write("// Generated by native/tools/define_users.py from %s on %s - do not edit.\n"
+                % (img.path.replace("/", "\\").split("\\")[-1], datetime.date.today()))
+        f.write("// AI defines read only by AI or UI code: safe to change on one machine in multiplayer.\n")
+        for n, kind, _, _ in out:
+            if kind == "ai":
+                f.write('"%s",\n' % n)
