@@ -79,10 +79,13 @@ static const char* PrettyName(const char* key) {
 
 static void DrawPanel() {
     ImGui::SetNextWindowSize(ImVec2(320, 0), ImGuiCond_FirstUseEver);
-    if (!ImGui::Begin("Human AI", &g_show, ImGuiWindowFlags_AlwaysAutoResize)) {
+    bool open = g_show;
+    if (!ImGui::Begin("Human AI", &open, ImGuiWindowFlags_AlwaysAutoResize)) {
         ImGui::End();
+        g_show = open;
         return;
     }
+    g_show = open;
 
     Status st = GetStatus();
     if (!st.resolved) {
