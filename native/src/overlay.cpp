@@ -1,10 +1,11 @@
 // ImGui overlay for the Human AI panel.
-// Hooks IDXGISwapChain::Present via inline detour to render on top of HoI4.
+// Hooks IDXGISwapChain::Present by patching the shared COM vtable, the same
+// approach the AI-module hooks use.  This avoids rewriting Present's code
+// bytes, which conflicts with Steam's own inline detour on that function.
 #include "overlay.h"
 #include "hai.h"
 
 #include <atomic>
-#include <cstring>
 #include <d3d11.h>
 #include <dxgi.h>
 
@@ -28,19 +29,8 @@ static ID3D11RenderTargetView* g_rtv = nullptr;
 static HWND                    g_hwnd = nullptr;
 static WNDPROC                 g_orig_wndproc = nullptr;
 
-// ---------------------------------------------------------------------------
-// Trampoline: 14 bytes of saved prologue + 14-byte absolute jump to original+14.
-// Allocated as PAGE_EXECUTE_READWRITE so we can call through it.
-// ---------------------------------------------------------------------------
-static uint8_t* g_trampoline = nullptr;
-static uint8_t* g_present_target = nullptr;
-constexpr int kDetourSize = 14;  // FF 25 [00000000] [addr64]
-
 using PresentFn = HRESULT(WINAPI*)(IDXGISwapChain*, UINT, UINT);
-
-static PresentFn OriginalPresent() {
-    return reinterpret_cast<PresentFn>(g_trampoline);
-}
+static PresentFn g_orig_present = nullptr;
 
 // ---------------------------------------------------------------------------
 // WndProc hook
@@ -133,7 +123,7 @@ static void DrawPanel() {
 }
 
 // ---------------------------------------------------------------------------
-// Present detour
+// Present hook
 // ---------------------------------------------------------------------------
 static void EnsureRTV(IDXGISwapChain* sc) {
     if (g_rtv) return;
@@ -179,18 +169,15 @@ static HRESULT WINAPI HookedPresent(IDXGISwapChain* sc, UINT sync, UINT flags) {
         }
     }
 
-    return OriginalPresent()(sc, sync, flags);
+    return g_orig_present(sc, sync, flags);
 }
 
 // ---------------------------------------------------------------------------
-// Hook installation
+// Hook installation: create a throwaway D3D11 device to locate the shared
+// IDXGISwapChain vtable, then swap the Present slot.  All swapchains of the
+// same concrete class share this vtable (it lives in dxgi.dll's .rdata), so
+// the game's swapchain — created later — picks up the patched pointer too.
 // ---------------------------------------------------------------------------
-static void WriteAbsJump(uint8_t* at, void* target) {
-    at[0] = 0xFF; at[1] = 0x25;
-    *reinterpret_cast<uint32_t*>(at + 2) = 0;
-    *reinterpret_cast<void**>(at + 6) = target;
-}
-
 static bool InstallPresentHook() {
     WNDCLASSEXW wc{sizeof(wc)};
     wc.lpfnWndProc = DefWindowProcW;
@@ -226,35 +213,21 @@ static bool InstallPresentHook() {
         return false;
     }
 
+    // Slot 8 in the IDXGISwapChain vtable is Present.
     void** vt = *reinterpret_cast<void***>(sc);
-    g_present_target = reinterpret_cast<uint8_t*>(vt[8]);
+    g_orig_present = reinterpret_cast<PresentFn>(vt[8]);
 
-    // Build trampoline: original prologue bytes + absolute jump to original+14.
-    g_trampoline = (uint8_t*)VirtualAlloc(nullptr, 64, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
-    if (!g_trampoline) {
-        sc->Release();
-        dev->Release();
-        DestroyWindow(dummy);
-        UnregisterClassW(wc.lpszClassName, wc.hInstance);
-        Log("overlay: trampoline alloc failed");
-        return false;
-    }
-    memcpy(g_trampoline, g_present_target, kDetourSize);
-    WriteAbsJump(g_trampoline + kDetourSize, g_present_target + kDetourSize);
-
-    // Patch the original function's entry point.
     DWORD old;
-    VirtualProtect(g_present_target, kDetourSize, PAGE_EXECUTE_READWRITE, &old);
-    WriteAbsJump(g_present_target, (void*)&HookedPresent);
-    FlushInstructionCache(GetCurrentProcess(), g_present_target, kDetourSize);
-    VirtualProtect(g_present_target, kDetourSize, old, &old);
+    VirtualProtect(&vt[8], sizeof(void*), PAGE_READWRITE, &old);
+    vt[8] = (void*)&HookedPresent;
+    VirtualProtect(&vt[8], sizeof(void*), old, &old);
 
     sc->Release();
     dev->Release();
     DestroyWindow(dummy);
     UnregisterClassW(wc.lpszClassName, wc.hInstance);
 
-    Log("overlay: Present detoured at %p, trampoline at %p", g_present_target, g_trampoline);
+    Log("overlay: Present vtable slot patched (orig=%p)", g_orig_present);
     return true;
 }
 
