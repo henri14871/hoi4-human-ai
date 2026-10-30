@@ -666,6 +666,20 @@ static void SyncPack(int role) {
         want = g_pack;
     }
     if (!g_pack_defines) want.clear();  // pack_defines=0: keep the game's own AI defines
+
+    // A pack's AI strategies are part of the synced game state (checksum "AI Strategy - ..."), so
+    // having loaded them at launch desyncs any multiplayer game. They can't be unloaded: warn.
+    static bool warned = false;
+    bool mp_risk = (role == kRoleHost || role == kRoleClient) && aidata::LoadedAny();
+    if (mp_risk != warned) {
+        warned = mp_risk;
+        char path[MAX_PATH];
+        sprintf_s(path, "%s\\human_ai_status.ini", g_dir);
+        WritePrivateProfileStringA("pack", "mp_warning", mp_risk ? "1" : "0", path);
+        if (mp_risk)
+            Log("WARNING: the AI pack's strategies/templates are loaded and this is a multiplayer game: it will desync. "
+                "Untick them in the window (pack_data=0) and restart the game before playing online.");
+    }
     bool game = role != kRoleNone;
     bool mp = Multiplayer();  // includes mp_test
     if (game == in_game && want == applied && (!game || mp == applied_mp)) return;

@@ -113,6 +113,7 @@ class SettingsForm : Form {
     readonly CheckBox enabledBox, topBox;
     readonly Label statusLabel, packLabel;
     readonly ComboBox packBox;
+    readonly CheckBox dataBox;
     readonly string packsDir;
     readonly System.Windows.Forms.Timer timer;
     DateTime iniTime;
@@ -187,7 +188,16 @@ class SettingsForm : Form {
         packLabel.AutoSize = false;
         packLabel.Size = new Size(348, 50);
         Controls.Add(packLabel);
-        y += 56;
+        y += 54;
+        dataBox = new CheckBox { Text = "Also its strategies, templates and designs\n(single-player only, restart to apply)",
+                                 Location = new Point(16, y), Size = new Size(348, 36), ForeColor = CMuted };
+        dataBox.CheckedChanged += delegate {
+            if (loading) return;
+            Ini.Set(ini, "human_ai", "pack_data", dataBox.Checked ? "1" : "0");
+            iniTime = File.Exists(ini) ? File.GetLastWriteTimeUtc(ini) : DateTime.MinValue;
+        };
+        Controls.Add(dataBox);
+        y += 42;
 
         topBox = new CheckBox { Text = "Keep on top of the game", Location = new Point(16, y), AutoSize = true, ForeColor = CMuted };
         topBox.CheckedChanged += delegate {
@@ -319,6 +329,7 @@ class SettingsForm : Form {
         enabledBox.Checked = Ini.Int(ini, "human_ai", "enabled", 1) != 0;
         foreach (var kv in toggles) ShowState(kv.Value, Ini.Int(ini, "human_ai", kv.Key, 0) != 0);
         topBox.Checked = Ini.Int(ini, "app", "keep_on_top", 1) != 0;
+        dataBox.Checked = Ini.Int(ini, "human_ai", "pack_data", 1) != 0;
         TopMost = topBox.Checked;
         loading = false;
         iniTime = File.Exists(ini) ? File.GetLastWriteTimeUtc(ini) : DateTime.MinValue;
@@ -344,6 +355,14 @@ class SettingsForm : Form {
                 ? string.Format("{0}: {1} AI settings applied, {2} gameplay settings ignored.{3}", pick,
                                 Ini.Int(statusIni, "pack", "applied", 0), Ini.Int(statusIni, "pack", "ignored", 0), extra)
                 : pick + ": settings apply when a game is loaded." + extra;
+        }
+
+        if (Ini.Int(statusIni, "pack", "mp_warning", 0) != 0 && Ini.Int(statusIni, "status", "pid", 0) == game.Id) {
+            packLabel.Text = "Multiplayer with the pack's strategies loaded: this will desync. Untick them below "
+                           + "and restart the game before playing online.";
+            packLabel.ForeColor = CBad;
+        } else {
+            packLabel.ForeColor = CMuted;
         }
 
         string state = Ini.Str(statusIni, "status", "state", "");

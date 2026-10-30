@@ -46,9 +46,9 @@ What Human AI takes from a pack:
 | From the pack | When | Notes |
 |---|---|---|
 | AI settings (`NAI`/`NAITheatre` defines, including arrays) | when a game loads, and live when you switch packs | **None** restores the game's own values |
-| AI strategies (`ai_strategy`, `ai_strategy_plans`) | at game start | restart the game to change |
-| AI division templates (`ai_templates`) | at game start | restart the game to change |
-| AI equipment designs (`ai_equipment`) and AI areas (`ai_areas`) | at game start | restart the game to change |
+| AI strategies (`ai_strategy`, `ai_strategy_plans`) | at game start | **single-player only**; restart the game to change |
+| AI division templates (`ai_templates`) | at game start | **single-player only**; restart the game to change |
+| AI equipment designs (`ai_equipment`) and AI areas (`ai_areas`) | at game start | **single-player only**; restart the game to change |
 
 - You don't enable the mod in the launcher, so your multiplayer checksum stays vanilla. The pack's
   files are read from outside the game's `common/` folder.
@@ -63,6 +63,12 @@ What Human AI takes from a pack:
 - **Combining mods:** one pack can hold several AI mods. Copy them into the same folder, as long as
   their file names don't clash. Example: *Better Mechanics: Frontline AI*, *AI Divisions* and
   *AI Designs* together.
+- **Strategies, templates and designs are single-player only.** The game evaluates AI strategies on
+  every PC, and their values are part of the synced game state, so loading a pack's strategies on
+  one PC desyncs a multiplayer game (tested: it changes the "AI Strategy" and "Supply Cache"
+  checksums even with the AI switched off). Untick **Also its strategies, templates and designs**
+  in the window (`pack_data=0`) and restart before playing online. The window warns you if you
+  forget.
 - **In multiplayer** (host or client), only AI settings that the AI alone reads are applied. Some
   `NAI` settings are also read by the game's simulation: for example
   `DEFAULT_SUPPLY_TRAIN_NEED_FACTOR` is read by the monthly update, and changing it on one PC

@@ -11,4 +11,8 @@ namespace aidata {
 // With patch=false only the lookups run (self-test).
 bool InstallPackLoaders(const std::string& pack_dir, bool patch = true);
 
+// True once any pack folder was loaded into the game's databases this session. AI strategies are
+// evaluated on every machine (their values are in the synced checksum), so this desyncs multiplayer.
+bool LoadedAny();
+
 }  // namespace aidata

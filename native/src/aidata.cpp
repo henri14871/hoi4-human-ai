@@ -45,6 +45,9 @@ static StrDtor_t StrDtor = nullptr;
 static Mount_t PhysfsMount = nullptr;
 static DbHook g_hooks[16];
 static int g_nhooks = 0;
+static bool g_loaded_any = false;
+
+bool LoadedAny() { return g_loaded_any; }
 
 // The game's string is MSVC std::string: 16-byte inline buffer, size at +0x10, capacity at +0x18.
 static const char* StrData(void* s) {
@@ -88,6 +91,7 @@ extern "C" void __fastcall HaiDbLoad(void* db, void* path, DbHook* hook) {
         hook->original(db, str);
         StrDtor(str);
         hai::Log("aidata: loaded pack folder %s", vpath);
+        g_loaded_any = true;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         hai::Log("aidata: loading %s failed (exception); the game's own %s is unaffected", vpath, folder);
     }
